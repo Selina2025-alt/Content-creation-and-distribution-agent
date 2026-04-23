@@ -1,0 +1,19 @@
+.env
+.env.*
+.obsidian/
+.worktrees/
+node_modules/
+dist/
+build/
+coverage/
+__pycache__/
+*.pyc
+.venv/
+venv/
+.DS_Store
+Thumbs.db
+
+# Common logs/temp files
+*.log
+*.tmp
+*.swp
