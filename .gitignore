@@ -1,0 +1,11 @@
+node_modules/
+.next/
+.next-dev/
+coverage/
+.codex-data/
+.codex-data-tests/
+.env.local
+.preview-dev.log
+.preview-dev.err.log
+.tmp_xhs_url.txt
+*.log
