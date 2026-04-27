@@ -115,6 +115,22 @@ function isModelUnavailable(status: number, bodyText: string) {
   );
 }
 
+function shouldTryNextImageModel(status: number, bodyText: string) {
+  if (isModelUnavailable(status, bodyText)) {
+    return true;
+  }
+
+  if (isProviderBusy(status, bodyText)) {
+    return true;
+  }
+
+  if (status === 408 || status === 409 || status === 425 || status === 429) {
+    return true;
+  }
+
+  return status >= 500;
+}
+
 function resolveImageModelCandidates(input: {
   configuredModel: string;
   hasInputImage: boolean;
@@ -239,9 +255,11 @@ export async function createSiliconFlowImageGeneration(
     configuredModel: config.model,
     hasInputImage: Boolean(input.image)
   });
-  let lastModelUnavailableError: Error | null = null;
+  const modelErrors: string[] = [];
 
   modelLoop: for (const model of modelCandidates) {
+    const isLastModel = model === modelCandidates[modelCandidates.length - 1];
+
     for (let attempt = 1; attempt <= MAX_BUSY_RETRIES; attempt += 1) {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), config.timeoutMs);
@@ -285,19 +303,16 @@ export async function createSiliconFlowImageGeneration(
             continue;
           }
 
-          if (
-            isModelUnavailable(response.status, bodyText) &&
-            model !== modelCandidates[modelCandidates.length - 1]
-          ) {
-            lastModelUnavailableError = new Error(
-              `SiliconFlow model unavailable: ${model}`
-            );
+          const failureMessage = `[${model}] SiliconFlow image request failed with ${response.status}: ${
+            bodyText || "empty response"
+          }`;
+
+          if (!isLastModel && shouldTryNextImageModel(response.status, bodyText)) {
+            modelErrors.push(failureMessage);
             continue modelLoop;
           }
 
-          throw new Error(
-            `SiliconFlow image request failed with ${response.status}: ${bodyText || "empty response"}`
-          );
+          throw new Error(failureMessage);
         }
 
         const payload = (await response.json()) as {
@@ -319,9 +334,32 @@ export async function createSiliconFlowImageGeneration(
         return imageUrl;
       } catch (error) {
         if (error instanceof Error && error.name === "AbortError") {
-          throw new Error(
-            `SiliconFlow image request timed out after ${config.timeoutMs}ms`
-          );
+          if (attempt < MAX_BUSY_RETRIES) {
+            await wait(attempt * 1_500);
+            continue;
+          }
+
+          const timeoutError = `[${model}] SiliconFlow image request timed out after ${config.timeoutMs}ms`;
+
+          if (!isLastModel) {
+            modelErrors.push(timeoutError);
+            continue modelLoop;
+          }
+
+          throw new Error(timeoutError);
+        }
+
+        const normalizedMessage =
+          error instanceof Error ? error.message : String(error);
+
+        if (attempt < MAX_BUSY_RETRIES) {
+          await wait(attempt * 1_500);
+          continue;
+        }
+
+        if (!isLastModel) {
+          modelErrors.push(`[${model}] ${normalizedMessage}`);
+          continue modelLoop;
         }
 
         throw error;
@@ -331,8 +369,10 @@ export async function createSiliconFlowImageGeneration(
     }
   }
 
-  if (lastModelUnavailableError) {
-    throw lastModelUnavailableError;
+  if (modelErrors.length > 0) {
+    throw new Error(
+      `SiliconFlow image request failed after trying all candidate models: ${modelErrors.join(" | ")}`
+    );
   }
 
   throw new Error("SiliconFlow image request failed after retries");

@@ -169,6 +169,56 @@ describe("siliconflow client", () => {
     expect(secondBody.model).toBe("Qwen/Qwen-Image");
   });
 
+  it("switches to fallback image model after repeated provider busy failures", async () => {
+    process.env.SILICONFLOW_API_KEY = "test-key";
+    process.env.SILICONFLOW_BASE_URL = "https://api.siliconflow.cn/v1";
+    process.env.SILICONFLOW_IMAGE_MODEL = "Qwen/Qwen-Image-Edit-2509";
+    process.env.SILICONFLOW_IMAGE_MODEL_FALLBACKS = "Qwen/Qwen-Image";
+
+    const busyResponse = {
+      ok: false,
+      status: 503,
+      text: async () =>
+        JSON.stringify({
+          code: 50508,
+          message: "System is too busy now. Please try again later.",
+          data: null
+        })
+    };
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(busyResponse)
+      .mockResolvedValueOnce(busyResponse)
+      .mockResolvedValueOnce(busyResponse)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          data: [
+            {
+              url: "https://cdn.example.com/fallback-success.png"
+            }
+          ]
+        })
+      });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      createSiliconFlowImageGeneration({
+        prompt: "Generate a robust fallback image"
+      })
+    ).resolves.toBe("https://cdn.example.com/fallback-success.png");
+
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+
+    const thirdBody = JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body));
+    const fourthBody = JSON.parse(String(fetchMock.mock.calls[3]?.[1]?.body));
+
+    expect(thirdBody.model).toBe("Qwen/Qwen-Image-Edit-2509");
+    expect(fourthBody.model).toBe("Qwen/Qwen-Image");
+  });
+
   it("keeps configured image-edit model as first choice for text-to-image", async () => {
     process.env.SILICONFLOW_API_KEY = "test-key";
     process.env.SILICONFLOW_BASE_URL = "https://api.siliconflow.cn/v1";
