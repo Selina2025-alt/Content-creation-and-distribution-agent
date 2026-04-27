@@ -1,19 +1,11 @@
-.env
-.env.*
-.obsidian/
-.worktrees/
 node_modules/
-dist/
-build/
+.next/
+.next-dev/
 coverage/
-__pycache__/
-*.pyc
-.venv/
-venv/
-.DS_Store
-Thumbs.db
-
-# Common logs/temp files
+.codex-data/
+.codex-data-tests/
+.env.local
+.preview-dev.log
+.preview-dev.err.log
+.tmp_xhs_url.txt
 *.log
-*.tmp
-*.swp
